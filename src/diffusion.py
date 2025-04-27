@@ -14,7 +14,7 @@ class SDNet(nn.Module):
         super(SDNet, self).__init__()
         self.in_dims = in_dims
         self.out_dims = out_dims
-        assert out_dims[0] == in_dims[0], "First in_dim must equal to first out_dim." # 修改后的断言
+        assert out_dims[0] == in_dims[0], "First in_dim must equal to first out_dim." 
         self.time_type = time_type
         self.time_emb_dim = emb_size
         self.norm = norm
