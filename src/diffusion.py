@@ -5,7 +5,6 @@ import numpy as np
 import math
 import torch.nn.functional as F
 
-# 复制之前的 SDNet 模型定义
 class SDNet(nn.Module):
     """
     A deep neural network for the reverse diffusion preocess, adapted for sequence data.
@@ -78,7 +77,7 @@ class SDNet(nn.Module):
 
         return h
 
-# 复制之前的 DiffusionProcess 模型定义
+
 class DiffusionProcess(nn.Module):
     def __init__(self, noise_schedule, noise_scale, noise_min, noise_max, steps, device, keep_num=10):
         super(DiffusionProcess, self).__init__()
@@ -329,67 +328,3 @@ def normal_kl(mean1, logvar1, mean2, logvar2):
 
 def mean_flat(tensor):
     return tensor.mean(dim=list(range(1, len(tensor.shape))))
-
-
-
-# -------------------- 测试用例 --------------------
-def test_model():
-    # 设置设备
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    # 定义模型参数
-    batch_size = 4
-    seq_len = 10
-    emb_dim = 256
-    time_emb_dim = 16
-    in_dims = [emb_dim, 256, 256]
-    out_dims = [emb_dim, 256, 256]
-    steps = 100
-
-    # 初始化 SDNet 模型
-    sdnet_model = SDNet(in_dims=in_dims, out_dims=out_dims, emb_size=time_emb_dim).to(device)
-
-    # 初始化 DiffusionProcess 模型
-    noise_schedule = "linear"
-    noise_scale = [1, 0.1]
-    noise_min = 0.0001
-    noise_max = 0.02
-    diffusion_process = DiffusionProcess(
-        noise_schedule=noise_schedule,
-        noise_scale=noise_scale,
-        noise_min=noise_min,
-        noise_max=noise_max,
-        steps=steps,
-        device=device
-    ).to(device)
-
-    # 生成随机输入数据
-    dummy_x = torch.randn(batch_size, seq_len, emb_dim).to(device)
-    dummy_timesteps = torch.randint(0, steps, (batch_size,)).long().to(device)
-    dummy_emb_s = torch.randn(batch_size, seq_len, emb_dim).to(device)
-
-    # 测试 SDNet 模型的前向传播
-    sdnet_output = sdnet_model(dummy_x, dummy_timesteps)
-    print("SDNet Output Shape:", sdnet_output.shape)
-    assert sdnet_output.shape == (batch_size, seq_len, emb_dim), "SDNet output shape mismatch"
-
-    # 测试 DiffusionProcess 的 forward_process
-    t, _ = diffusion_process.sample_timesteps(batch_size, device)
-    forward_output = diffusion_process.forward_process(dummy_emb_s, t)
-    print("DiffusionProcess Forward Output Shape:", forward_output.shape)
-    assert forward_output.shape == dummy_emb_s.shape, "DiffusionProcess forward_process output shape mismatch"
-
-    # 测试 DiffusionProcess 的 caculate_losses
-    losses = diffusion_process.caculate_losses(sdnet_model, dummy_emb_s)
-    print("DiffusionProcess Losses:", losses['loss'].shape)
-    assert 'loss' in losses, "Loss key not found in caculate_losses output"
-
-    # 测试 DiffusionProcess 的 p_sample
-    p_sample_output = diffusion_process.p_sample(sdnet_model, dummy_emb_s, steps=10)
-    print("DiffusionProcess p_sample Output Shape:", p_sample_output.shape)
-    assert p_sample_output.shape == dummy_emb_s.shape, "DiffusionProcess p_sample output shape mismatch"
-
-    print("All tests passed!")
-
-if __name__ == "__main__":
-    test_model()

@@ -23,7 +23,7 @@ def main():
     # system args
     parser.add_argument("--data_dir", default="../process_data/", type=str)
     parser.add_argument("--output_dir", default="output/", type=str)
-    parser.add_argument("--data_name", default="Toys", type=str)  # [Sports_and_Outdoors, Beauty, Toys_and_Games]
+    parser.add_argument("--data_name", default="Toys", type=str)  # [Sports_and_Outdoors, Beauty, Toys_and_Games, Home]
     parser.add_argument("--encoder",default="SAS",type=str) 
     parser.add_argument("--do_eval", action="store_true")
     parser.add_argument("--model_idx", default=0, type=int, help="model idenfier 10, 20, 30...")

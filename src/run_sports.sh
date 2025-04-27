@@ -1,1 +1,0 @@
-python -u main.py --data_name Sports_and_Outdoors

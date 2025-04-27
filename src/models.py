@@ -94,6 +94,7 @@ class SASRecModel(nn.Module):
         noise_scale = [1, 0.1]
         noise_min = 0.0001
         noise_max = 0.02
+        self.denoise_weight = 0.08
         self.diffusion_process = DiffusionProcess(
             noise_schedule=noise_schedule,
             noise_scale=noise_scale,
@@ -109,12 +110,11 @@ class SASRecModel(nn.Module):
 
         self.apply(self.init_weights)
 
-        # 多模态表征
-        print("---------- 开始读取多模态表征 -----------")
+        # multimodal embedding
         self.replace_embedding()
 
     def replace_embedding(self):
-        """ 将文本 + 图像表征 初始化 """
+        """ multimodal init """
 
         text_features_list = torch.load(self.args.text_embedding_path)
         image_features_list = torch.load(self.args.image_embedding_path)
@@ -122,6 +122,11 @@ class SASRecModel(nn.Module):
         self.text_embeddings.weight.data[1:-1, :] = text_features_list
     
     def multimodal_fusion(self, text_embeddings, img_embeddings, item_embeddings=None):
+        """
+            Uncertainty-Guided Modality Denoising Fusion Layer
+        """
+        
+        
         # Enhanced experts to capture uncertainty for each modality
         t_mu = self.mu_text(text_embeddings)
         t_sigma = torch.exp(self.sigma_text(text_embeddings))
@@ -164,13 +169,12 @@ class SASRecModel(nn.Module):
 
         routing_weights = F.softmax(gate_logits, dim=-1)
         
-        # 得到topk的expert，其他的expert的输出全为0
+        # topk
         top_k_weights, indices = torch.topk(routing_weights, k=k, dim=-1)
-
-        # 将topk的expert的输出全为1，其他的expert的输出全为0
         routing_weights_new = torch.zeros_like(routing_weights)
         routing_weights_new.scatter_(-1, indices, top_k_weights)
-        # 归一化
+
+        # norm
         routing_weights_new = routing_weights_new / routing_weights_new.sum(dim=-1, keepdim=True)
         return routing_weights_new
 
@@ -180,13 +184,12 @@ class SASRecModel(nn.Module):
 
         routing_weights = F.softmax(gate_logits, dim=-1)
 
-        # 得到topk的expert，其他的expert的输出全为0
+        # topk
         top_k_weights, indices = torch.topk(routing_weights, k=k, dim=-1)
-
-        # 将topk的expert的输出全为1，其他的expert的输出全为0
         routing_weights_new = torch.zeros_like(routing_weights)
         routing_weights_new.scatter_(-1, indices, top_k_weights)
-        # 归一化
+
+        # norm
         routing_weights_new = routing_weights_new / routing_weights_new.sum(dim=-1, keepdim=True)
         return routing_weights_new
     
@@ -207,7 +210,7 @@ class SASRecModel(nn.Module):
         position_ids = torch.arange(seq_length, dtype=torch.long, device=sequence.device)
         position_ids = position_ids.unsqueeze(0).expand_as(sequence)
 
-        # 获取基础ID表征
+        # id embedding
         item_embeddings = self.item_embeddings(
             sequence)  # shape: batch_size, sequence_length, args.hidden_size
         position_embeddings = self.position_embeddings(position_ids)
@@ -218,17 +221,15 @@ class SASRecModel(nn.Module):
         img_embeddings_denoised = None
         
         if self.args.is_use_mm:
-            # 获得文本和图片的表征
+            # get text and image embedding
             text_embeddings = self.text_embeddings(sequence)
             text_embeddings = self.fc_text(text_embeddings)
             text_embeddings = F.normalize(text_embeddings, p=2, dim=-1)
             
-            # 图像模态处理
             img_embeddings = self.img_embeddings(sequence)
             img_embeddings = self.fc_img(img_embeddings)
             img_embeddings = F.normalize(img_embeddings, p=2, dim=-1)
             
-            # 注意：在forward方法中进行扩散处理
 
         sequence_emb = item_embeddings + position_embeddings
         sequence_emb = self.LayerNorm(sequence_emb)
@@ -269,102 +270,97 @@ class SASRecModel(nn.Module):
         extended_attention_mask = extended_attention_mask.to(dtype=next(self.parameters()).dtype)  # fp16 compatibility
         extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
 
-        # 获取序列嵌入
+        # multimodal embedding
         sequence_emb, text_embeddings, img_embeddings, item_id_emb = self.get_modality_embeddings(input_ids)
 
-        # 初始化损失
+        # init loss
         t_emb_loss = 0
         v_emb_loss = 0
         diff_loss = 0
         
         if self.args.is_use_mm:
             if is_train:
-                # 第一层：域差异性去噪
-                # 1. 文本域差异性
+                """ Multimodal Domain Shift Denoising Layer """
+                # text
                 t_domain_terms = self.diffusion_process.caculate_losses(self.sdnet_td, text_embeddings)
                 t_domain_loss = t_domain_terms['loss'].mean()
                 
-                # 2. 图像域差异性
+                # image
                 v_domain_terms = self.diffusion_process.caculate_losses(self.sdnet_vd, img_embeddings)
                 v_domain_loss = v_domain_terms['loss'].mean()
                 
-                # 去除域差异的特征表征
                 text_embeddings_denoised = self.diffusion_process.p_sample(self.sdnet_td, text_embeddings, steps=5, sampling_noise=False)
                 img_embeddings_denoised = self.diffusion_process.p_sample(self.sdnet_vd, img_embeddings, steps=5, sampling_noise=False)
 
                 
                 
-                # 第二层：基于ID表征引导的条件扩散（去除背景噪声）
-                # 1. 准备ID条件
+                """ Multimodal Interest-agnostic Denoising Layer """
+                # ID_embdding as candition
                 self.centroids, self.labels = self.intent_cluster(item_id_emb, self.n_clusters)
                 id_condition = item_id_emb*self.lambda_history+self.centroids[self.labels]*self.lambda_intent
                 
-                # 2. 文本条件融合
+                # text
                 text_concat_features = torch.cat([text_embeddings_denoised, id_condition], dim=-1)
                 text_gate = self.condition_gate(text_concat_features)
                 text_fusion_features = self.condition_fusion(text_concat_features)
                 text_conditioned_emb = text_embeddings_denoised * (1 - text_gate) + text_fusion_features * text_gate
                 
-                # 3. 图像条件融合
+                # image
                 img_concat_features = torch.cat([img_embeddings_denoised, id_condition], dim=-1)
                 img_gate = self.condition_gate(img_concat_features)
                 img_fusion_features = self.condition_fusion(img_concat_features)
                 img_conditioned_emb = img_embeddings_denoised * (1 - img_gate) + img_fusion_features * img_gate
                 
-                # 4. 计算条件去噪损失
+                # loss
                 t_condition_loss = self.diffusion_process.caculate_losses(self.sdnet_tc, text_conditioned_emb)['loss'].mean()
                 v_condition_loss = self.diffusion_process.caculate_losses(self.sdnet_vc, img_conditioned_emb)['loss'].mean()
                 
-                # 5. 进行条件去噪获得最终特征
+                # after denoised
                 text_embeddings_denoised = self.diffusion_process.p_sample(self.sdnet_tc, text_conditioned_emb, steps=5, sampling_noise=False)
                 img_embeddings_denoised = self.diffusion_process.p_sample(self.sdnet_vc, img_conditioned_emb, steps=5, sampling_noise=False)
                 
-                # 6. 融合去噪后的特征到序列表征
+                #  final emb
                 enhanced_seq_emb, t_mu, t_sigma, i_mu, i_sigma = self.multimodal_fusion(text_embeddings_denoised, img_embeddings_denoised, sequence_emb)
                 # enhanced_seq_emb = sequence_emb + text_embeddings_denoised + img_embeddings_denoised
                 
-                # 7. 最终序列去噪损失
+                # denoised loss
                 final_diff_loss = self.diffusion_process.caculate_losses(self.sdnet_f, enhanced_seq_emb)['loss'].mean()
                 kl_loss = self.compute_kl_loss(t_mu, t_sigma) + self.compute_kl_loss(i_mu, i_sigma)
-                # 8. 总损失计算 - 域差异性损失 + 条件去噪损失 + 最终序列去噪损失
+
+                # total loss
                 t_emb_loss = t_domain_loss
                 v_emb_loss = v_domain_loss
                 diff_loss = 0.5 * (t_condition_loss + v_condition_loss) + 0.5 * final_diff_loss + 2 * kl_loss
 
-            else:  # 测试阶段
-                # 1. 域差异性去噪
+            else:  # inference
+                """ Multimodal Domain Shift Denoising Layer """
                 text_embeddings_denoised = self.diffusion_process.p_sample(self.sdnet_td, text_embeddings, steps=5, sampling_noise=False)
                 img_embeddings_denoised = self.diffusion_process.p_sample(self.sdnet_vd, img_embeddings, steps=5, sampling_noise=False)
                 
 
-                # 2. 准备ID条件
+                """ Multimodal Interest-agnostic Denoising Layer """
                 self.centroids, self.labels = self.intent_cluster(item_id_emb, self.n_clusters)
                 id_condition = item_id_emb*self.lambda_history+self.centroids[self.labels]*self.lambda_intent
                 
-                # 3. 条件融合和去噪
-                # 文本条件去噪
+                # text
                 text_concat_features = torch.cat([text_embeddings_denoised, id_condition], dim=-1)
                 text_gate = self.condition_gate(text_concat_features)
                 text_fusion_features = self.condition_fusion(text_concat_features)
                 text_conditioned_emb = text_embeddings_denoised * (1 - text_gate) + text_fusion_features * text_gate
                 text_denoised = self.diffusion_process.p_sample(self.sdnet_tc, text_conditioned_emb, steps=5, sampling_noise=False)
                 
-                # 图像条件去噪
+                # image
                 img_concat_features = torch.cat([img_embeddings_denoised, id_condition], dim=-1)
                 img_gate = self.condition_gate(img_concat_features)
                 img_fusion_features = self.condition_fusion(img_concat_features)
                 img_conditioned_emb = img_embeddings_denoised * (1 - img_gate) + img_fusion_features * img_gate
                 img_denoised = self.diffusion_process.p_sample(self.sdnet_vc, img_conditioned_emb, steps=5, sampling_noise=False)
-                
 
-                # 4. 融合去噪后的特征
                 enhanced_seq_emb, _, _, _, _ = self.multimodal_fusion(text_embeddings_denoised, img_embeddings_denoised, sequence_emb)
                 
-                # 5. 最终序列去噪
+                # after denoised
                 final_seq_emb = self.diffusion_process.p_sample(self.sdnet_f, enhanced_seq_emb, steps=5, sampling_noise=False)
-                
-                # 6. 加权组合原始表征和去噪后的表征
-                self.denoise_weight = 0.08  # 可调整的权重参数
+             
                 sequence_emb = (1 - self.denoise_weight) * sequence_emb + self.denoise_weight * final_seq_emb
 
         # transformer encoder
