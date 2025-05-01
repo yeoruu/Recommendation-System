@@ -42,9 +42,6 @@ def main():
         "--temperature", default=1.0, type=float, help="softmax temperature (default:  1.0) - not studied."
     )
 
-    parser.add_argument(
-        "--intent_num",default=256, type=int, help="the multi intent nums!."
-    )
 
     parser.add_argument(
         "--sim",default='dot',type=str,help="the calculate ways of the similarity."
@@ -70,12 +67,12 @@ def main():
     parser.add_argument("--diff_loss", type=float, default=0.01)
     parser.add_argument("--icl_loss", type=float, default=0.001)
 
-    # 多模态 + 多语言
+    # multi modal
     parser.add_argument("--is_use_mm", type=bool, default=True, help="is use mm embedding")
     parser.add_argument("--is_use_text", type=bool, default=True, help="is use text embedding")
     parser.add_argument("--is_use_image", type=bool, default=False, help="is use image embedding")
-    parser.add_argument("--text_embedding_path", default='../process_data/text_features_toys.pt', type=str)
-    parser.add_argument("--image_embedding_path", default='../process_data/image_features_toys.pt', type=str)
+    parser.add_argument("--text_embedding_path", default='../process_data/text_features_beauty.pt', type=str)
+    parser.add_argument("--image_embedding_path", default='../process_data/image_features_beauty.pt', type=str)
     parser.add_argument("--pretrain_emb_dim", type=int, default=512, help="pretrain_emb_dim of clip model")
     parser.add_argument("--is_use_cross", type=bool, default=True, help="is use mm cross")
 
