@@ -1,0 +1,31 @@
+adam_beta1: 0.9
+adam_beta2: 0.98 
+batch_size: 1024
+dropout: 0.2
+
+config_files: ./config/
+dataset: JD
+decay_factor: 0.9
+eval_freq: 1
+hidden_act: relu
+hidden_size: 128 
+inner_size: 512
+n_layers: 2
+n_heads: 2
+
+init_std: 0.02
+log_freq: 1
+lr: 0.001
+max_epochs: 5000
+max_seq_length: 50 
+min_lr: 1.0e-06
+'no': 1
+output_dir: ./output
+patience: 5
+run_dir: ./run
+seed: 2025
+weight_decay: 0.0
+layer_norm_eps: 1e-12
+initializer_range: 0.02
+behavior_types: 4
+loss_type: CE
